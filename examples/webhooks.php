@@ -30,60 +30,115 @@ $account_details = array(
 // Initialize GoCardless
 GoCardless::set_account_details($account_details);
 
-// Use this line to fetch the body of the HTTP request
+
+$email['to']	= $_SERVER["SERVER_ADMIN"];
 $webhook = file_get_contents('php://input');
-
-// Or use this json blog for testing
-//$webhook = '{
-//    "payload": {
-//        "resource_type": "bill",
-//        "action": "paid",
-//        "bills": [
-//            {
-//                "id": "AKJ398H8KA",
-//                "status": "paid",
-//                "source_type": "subscription",
-//                "source_id": "KKJ398H8K8",
-//                "paid_at": "2011-12-01T12:00:00Z",
-//                "uri": "https://sandbox.gocardless.com/api/v1/bills/AKJ398H8KA"
-//            },
-//            {
-//                "id": "AKJ398H8KB",
-//                "status": "paid",
-//                "source_type": "subscription",
-//                "source_id": "8AKJ398H78",
-//                "paid_at": "2011-12-09T12:00:00Z",
-//                "uri": "https://sandbox.gocardless.com/api/v1/bills/AKJ398H8KB"
-//            }
-//        ],
-//        "signature": "f6b9e6cd8eef30c444da48370e646839c9bb9e1cf10ea16164d5cf93a50231eb"
-//    }
-//}';
-
-// Convert json blog to array
-$webhook_array = json_decode($webhook, true);
-
-// Validate webhook
-$webhook_valid = GoCardless::validate_webhook($webhook_array['payload']);
-
-// Write webhook to a file for inspection
-// You'll probably need to create this file and make it writable
-$log = fopen('webhooks.txt', 'a');
-
-if ($webhook_valid != TRUE) {
-  fwrite($log, "Invalid webhook:\n\n");
-}
-
-fwrite($log, print_r($webhook_array, TRUE) . "\n\n");
-fclose($log);
+$w = json_decode($webhook, true);
+$webhook_valid = GoCardless::validate_webhook($w['payload']);
 
 if ($webhook_valid == TRUE) {
 
-  // Send a success header
+  	// Send a success header
   header('HTTP/1.1 200 OK');
+  
+  $email['content'] = print_r($w, TRUE);
+  mail($email['to'], 'goCardless webhook', $email['content'], "FROM: " . $email['to']);
+  
+  switch( $w['payload']['resource_type'] ){
+  	case 'bill':
+  		$data = $w['payload']['bills'];
+  		switch( $w['payload']['action'] ){
+  			case 'created': //bill is created automatically under a subscription
+  				mail($email['to'], 'goCardless webhook - bill - created', $email['content'], "FROM: " . $email['to']);
+  				foreach($data as $bill){
+  					//get all fields, not available in webhook
+  					$b 	= GoCardless_Bill::find( $bill['id'] );
+  				}
+  			break;
+  			
+  			case 'failed': //bill could not be debited from a customer's account
+  				mail($email['to'], 'goCardless webhook bill failed (e.g. no funds)', $email['content'], "FROM: " . $email['to']);
+  			break;
+  			
+  			case 'paid': //bill has successfully been debited from a customer's account
+  				mail($email['to'], 'goCardless webhook - bill - paid', $email['content'], "FROM: " . $email['to']);
+  				foreach($data as $bill){
+  					$b 	= GoCardless_Bill::find( $bill['id'] );
+  				}
+  			break;
+  			
+  			case 'withdrawn': //paid into merchant's bank
+  				mail($email['to'], 'goCardless webhook withdrawn (paid to bank)', $email['content'], "FROM: " . $email['to']);
+  			break;
+  			
+  			case 'refunded': //result of a chargeback that a customer has filed with their bank under the Direct Debit Guarantee
+  				mail($email['to'], 'goCardless webhook refunded', $email['content'], "FROM: " . $email['to']);
+  			break;
+  			
+  			case 'retried': //bill is submitted to the bank again after having previously failed
+  				mail($email['to'], 'goCardless webhook retried', $email['content'], "FROM: " . $email['to']);
+  			break;
+  			
+  			default: //unexpected action, email
+  				mail($email['to'], 'goCardless webhook exception', $email['content'], "FROM: " . $email['to']);
+  		}
+  	break;
+  
+  	case 'subscription':
+  		$data = $w['payload']['subscriptions'];
+  		switch( $w['payload']['action'] ){
+  			case 'cancelled': //subscription is cancelled
+  				mail($email['to'], 'goCardless webhook - sub - cancelled', $email['content'], "FROM: " . $email['to']);
+  				foreach($data as $sub){
+  					//get all fields, not available in webhook
+  					$b 	= GoCardless_Subscription::find( $sub['id'] );
+  				}
+  			break;
+  			
+  			case 'expired': //subscription has reached set expiry date
+  				mail($email['to'], 'goCardless webhook - sub - expired', $email['content'], "FROM: " . $email['to']);
+  				foreach($data as $sub){
+  					//get all fields, not available in webhook
+  					$b 	= GoCardless_Subscription::find( $sub['id'] );
+  				}
+  			break;
+  			
+  			default: //unexpected action, email
+  				mail($email['to'], 'goCardless webhook exception', $email['content'], "FROM: " . $email['to']);
+  		}
+  	break;
+  	
+  	case 'pre_authorization':
+  		$data = $w['payload']['pre_authorizations'];
+  		switch( $w['payload']['action'] ){
+  			case 'cancelled': //pre-auth is cancelled
+  				mail($email['to'], 'goCardless webhook - pre-auth - cancelled', $email['content'], "FROM: " . $email['to']);
+  				foreach($data as $pre){
+  					//get all fields, not available in webhook
+  					$b 	= GoCardless_PreAuthorization::find( $pre['id'] );
+  				}
+  			break;
+  			
+  			case 'expired': //pre-auth has reached set expiry date
+  				mail($email['to'], 'goCardless webhook - pre-auth - expired', $email['content'], "FROM: " . $email['to']);
+  				foreach($data as $pre){
+  					//get all fields, not available in webhook
+  					$b 	= GoCardless_PreAuthorization::find( $pre['id'] );
+  				}
+  			break;
+  			
+  			default: //unexpected action, email
+  				mail($email['to'], 'goCardless webhook exception', $email['content'], "FROM: " . $email['to']);
+  		}
+  	break;
+  	
+  	default: //unexpected action, email
+  		mail($email['to'], 'goCardless webhook exception', $email['content'], "FROM: " . $email['to']);
+  }
 
 } else {
 
   header('HTTP/1.1 403 Invalid signature');
 
 }
+?>
